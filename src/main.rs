@@ -1,6 +1,7 @@
 use std::io;
+use std::net::SocketAddr;
 
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
+use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::body::{Bytes, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
@@ -14,9 +15,16 @@ use tokio::net::{TcpListener, TcpStream};
 type ServerBuilder = hyper::server::conn::http1::Builder;
 type ClientBuilder = hyper::client::conn::http1::Builder;
 
+#[derive(thiserror::Error, Debug)]
 enum HyperPassError {
+    #[error("failed to connect to upstream server")]
     UpstreamConnectError,
+    #[error("failed to send request to upstream server")]
     UpstreamRequestError,
+    #[error("failed to open tcp connection to upstream server")]
+    UpstreamTCPConnFailed,
+    #[error("failed to handshake with upstream server")]
+    UpstreamHandshakeFailed,
 }
 
 #[tokio::main]
@@ -60,24 +68,35 @@ async fn handle_http_connection(in_sock: TcpStream) -> io::Result<()> {
     Ok(())
 }
 
+struct LoadBalancer {
+    servers: Vec<SocketAddr>
+}
+
+impl 
+
 async fn service(
     req: Request<Incoming>,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HyperPassError> {
     println!("req recvd");
 
-    let out_sock = TcpStream::connect("localhost:8090").await.unwrap();
+    let out_sock = TcpStream::connect("localhost:8090")
+        .await
+        .map_err(|e| HyperPassError::UpstreamTCPConnFailed)?;
     let io = TokioIo::new(out_sock);
-    let (mut sender, conn) = ClientBuilder::new().handshake(io).await?;
-
-    // .map_err(|e| HyperPassError::UpstreamConnectError)?;
+    let (mut sender, conn) = ClientBuilder::new()
+        .handshake(io)
+        .await
+        .map_err(|e| HyperPassError::UpstreamHandshakeFailed)?;
     tokio::spawn(async {
         if let Err(e) = conn.await {
             println!("err: {}", e);
         }
     });
 
-    let resp = sender.send_request(req).await?;
-    // .map_err(|e| HyperPassError::UpstreamRequestError)?;
+    let resp = sender
+        .send_request(req)
+        .await
+        .map_err(|e| HyperPassError::UpstreamRequestError)?;
 
     Ok(resp.map(|b| b.boxed()))
 }
