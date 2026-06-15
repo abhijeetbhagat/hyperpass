@@ -1,6 +1,8 @@
 use std::io;
 
+mod error;
 mod http;
+mod loadbalance;
 mod tcp;
 
 #[tokio::main]

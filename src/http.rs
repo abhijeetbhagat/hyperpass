@@ -1,73 +1,82 @@
 use std::io;
-use std::net::SocketAddr;
-use std::sync::atomic::AtomicUsize;
 
-use http_body_util::{BodyExt, Full, combinators::BoxBody};
+use crate::error::HyperPassError;
+use crate::loadbalance::LoadBalancer;
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tokio::net::{TcpListener, TcpStream};
+use tokio_rustls::TlsAcceptor;
 
 type ServerBuilder = hyper::server::conn::http1::Builder;
 type ClientBuilder = hyper::client::conn::http1::Builder;
 
-#[derive(thiserror::Error, Debug)]
-enum HyperPassError {
-    #[error("failed to connect to upstream server")]
-    UpstreamConnectError,
-    #[error("failed to send request to upstream server")]
-    UpstreamRequestError,
-    #[error("failed to open tcp connection to upstream server")]
-    UpstreamTCPConnFailed,
-    #[error("failed to handshake with upstream server")]
-    UpstreamHandshakeFailed,
-}
-
-struct LoadBalancer {
-    servers: Vec<SocketAddr>,
-    cur_server: AtomicUsize,
-}
-
-impl LoadBalancer {
-    fn new() -> Self {
-        Self {
-            servers: vec![
-                "127.0.0.1:8090".parse().unwrap(),
-                "127.0.0.1:8091".parse().unwrap(),
-            ],
-            cur_server: AtomicUsize::new(0),
-        }
-    }
-
-    fn next(&self) -> SocketAddr {
-        let next_server = self
-            .cur_server
-            .fetch_update(Ordering::Release, Ordering::Acquire, |cur| {
-                Some((cur + 1) % self.servers.len())
-            })
-            .unwrap();
-        self.servers[next_server]
-    }
-}
-
-pub async fn start_http_proxy() -> io::Result<()> {
-    let listener = TcpListener::bind("0.0.0.0:9080").await?;
-    println!("http server listening ...");
+pub async fn start_http_proxy() -> Result<(), HyperPassError> {
+    let listener = TcpListener::bind("0.0.0.0:9080").await.map_err(|e| {
+        eprintln!("couldnt bind to port");
+        HyperPassError::HttpServerStartError
+    })?;
 
     let lb = Arc::new(LoadBalancer::new());
 
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let certs = CertificateDer::pem_file_iter("certs/sample.pem")
+        .map_err(|e| {
+            eprintln!("couldn't load cert: {e}");
+            HyperPassError::CertLoadError
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            eprintln!("couldn't load cert: {e}");
+            HyperPassError::CertLoadError
+        })?;
+    print!("cert loaded");
+    let key = PrivateKeyDer::from_pem_file("certs/sample.rsa").map_err(|e| {
+        eprintln!("couldn't load private key: {e}");
+        HyperPassError::KeyLoadError
+    })?;
+    let mut server_config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| HyperPassError::ServerConfigError)?;
+    server_config.alpn_protocols = vec![b"http/1.1".to_vec(), b"http/1.0".to_vec(), b"h2".to_vec()];
+
+    let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+
+    println!("http server listening ...");
+
     while let Ok((sock, addr)) = listener.accept().await {
         let lb = lb.clone();
-        tokio::spawn(async move { handle_http_connection(lb, sock).await });
+        let tls_acceptor = tls_acceptor.clone();
+
+        tokio::spawn(async move {
+            match tls_acceptor.accept(sock).await {
+                Ok(server_tls_stream) => {
+                    if let Err(e) = handle_http_connection(lb, server_tls_stream).await {
+                        eprintln!("Error handling connection from {}: {:?}", addr, e);
+                    }
+                }
+                Err(e) => {
+                    // Log handshake errors safely without crashing the server loop
+                    eprintln!("TLS handshake failed for {}: {:?}", addr, e);
+                }
+            }
+        });
     }
 
     Ok(())
 }
 
-async fn handle_http_connection(lb: Arc<LoadBalancer>, in_sock: TcpStream) -> io::Result<()> {
+async fn handle_http_connection(
+    lb: Arc<LoadBalancer>,
+    in_sock: tokio_rustls::server::TlsStream<TcpStream>,
+) -> io::Result<()> {
     let io = TokioIo::new(in_sock);
     let addr = lb.next(); //"localhost:8090";
 
