@@ -7,6 +7,7 @@ use hyper::body::{Bytes, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
+use log::*;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
@@ -19,7 +20,7 @@ type ClientBuilder = hyper::client::conn::http1::Builder;
 
 pub async fn start_http_proxy() -> Result<(), HyperPassError> {
     let listener = TcpListener::bind("0.0.0.0:9080").await.map_err(|e| {
-        eprintln!("couldnt bind to port");
+        error!("couldnt bind to port: {e}");
         HyperPassError::HttpServerStartError
     })?;
 
@@ -28,28 +29,31 @@ pub async fn start_http_proxy() -> Result<(), HyperPassError> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let certs = CertificateDer::pem_file_iter("certs/sample.pem")
         .map_err(|e| {
-            eprintln!("couldn't load cert: {e}");
+            error!("couldn't load cert: {e}");
             HyperPassError::CertLoadError
         })?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| {
-            eprintln!("couldn't load cert: {e}");
+            error!("couldn't load cert: {e}");
             HyperPassError::CertLoadError
         })?;
     print!("cert loaded");
     let key = PrivateKeyDer::from_pem_file("certs/sample.rsa").map_err(|e| {
-        eprintln!("couldn't load private key: {e}");
+        error!("couldn't load private key: {e}");
         HyperPassError::KeyLoadError
     })?;
     let mut server_config = ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
-        .map_err(|e| HyperPassError::ServerConfigError)?;
+        .map_err(|e| {
+            error!("{e}");
+            HyperPassError::ServerConfigError
+        })?;
     server_config.alpn_protocols = vec![b"http/1.1".to_vec(), b"http/1.0".to_vec(), b"h2".to_vec()];
 
     let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
 
-    println!("http server listening ...");
+    debug!("http server listening ...");
 
     while let Ok((sock, addr)) = listener.accept().await {
         let lb = lb.clone();
@@ -59,12 +63,11 @@ pub async fn start_http_proxy() -> Result<(), HyperPassError> {
             match tls_acceptor.accept(sock).await {
                 Ok(server_tls_stream) => {
                     if let Err(e) = handle_http_connection(lb, server_tls_stream).await {
-                        eprintln!("Error handling connection from {}: {:?}", addr, e);
+                        error!("Error handling connection from {}: {:?}", addr, e);
                     }
                 }
                 Err(e) => {
-                    // Log handshake errors safely without crashing the server loop
-                    eprintln!("TLS handshake failed for {}: {:?}", addr, e);
+                    error!("TLS handshake failed for {}: {:?}", addr, e);
                 }
             }
         });
@@ -84,29 +87,30 @@ async fn handle_http_connection(
         .serve_connection(
             io,
             service_fn(async |req: Request<Incoming>| {
-                println!("req recvd");
+                debug!("req recvd");
 
-                let out_sock = TcpStream::connect(addr)
-                    .await
-                    .map_err(|e| HyperPassError::UpstreamTCPConnFailed)?;
+                let out_sock = TcpStream::connect(addr).await.map_err(|e| {
+                    error!("{e}");
+                    HyperPassError::UpstreamTCPConnFailed
+                })?;
 
                 let io = TokioIo::new(out_sock);
 
-                let (mut sender, conn) = ClientBuilder::new()
-                    .handshake(io)
-                    .await
-                    .map_err(|e| HyperPassError::UpstreamHandshakeFailed)?;
+                let (mut sender, conn) = ClientBuilder::new().handshake(io).await.map_err(|e| {
+                    error!("{e}");
+                    HyperPassError::UpstreamHandshakeFailed
+                })?;
 
                 tokio::spawn(async {
                     if let Err(e) = conn.await {
-                        println!("err: {}", e);
+                        debug!("err: {}", e);
                     }
                 });
 
-                let resp = sender
-                    .send_request(req)
-                    .await
-                    .map_err(|e| HyperPassError::UpstreamRequestError)?;
+                let resp = sender.send_request(req).await.map_err(|e| {
+                    error!("{e}");
+                    HyperPassError::UpstreamRequestError
+                })?;
 
                 Ok::<Response<BoxBody<hyper::body::Bytes, hyper::Error>>, HyperPassError>(
                     resp.map(|b| b.boxed()),
@@ -120,26 +124,27 @@ async fn handle_http_connection(
 async fn service(
     req: Request<Incoming>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HyperPassError> {
-    println!("req recvd");
+    debug!("req recvd");
 
-    let out_sock = TcpStream::connect("localhost:8090")
-        .await
-        .map_err(|e| HyperPassError::UpstreamTCPConnFailed)?;
+    let out_sock = TcpStream::connect("localhost:8090").await.map_err(|e| {
+        error!("{e}");
+        HyperPassError::UpstreamTCPConnFailed
+    })?;
     let io = TokioIo::new(out_sock);
-    let (mut sender, conn) = ClientBuilder::new()
-        .handshake(io)
-        .await
-        .map_err(|e| HyperPassError::UpstreamHandshakeFailed)?;
+    let (mut sender, conn) = ClientBuilder::new().handshake(io).await.map_err(|e| {
+        error!("{e}");
+        HyperPassError::UpstreamHandshakeFailed
+    })?;
     tokio::spawn(async {
         if let Err(e) = conn.await {
-            println!("err: {}", e);
+            debug!("err: {}", e);
         }
     });
 
-    let resp = sender
-        .send_request(req)
-        .await
-        .map_err(|e| HyperPassError::UpstreamRequestError)?;
+    let resp = sender.send_request(req).await.map_err(|e| {
+        error!("{e}");
+        HyperPassError::UpstreamRequestError
+    })?;
 
     Ok(resp.map(|b| b.boxed()))
 }
