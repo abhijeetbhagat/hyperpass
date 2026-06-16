@@ -14,25 +14,34 @@ mod tcp;
 async fn main() -> io::Result<()> {
     env_logger::init();
 
-    let mut locs = HashMap::new();
-    locs.insert(
+    let mut locs_a = HashMap::new();
+    locs_a.insert(
         "/".to_owned(),
         Upstream::new(vec![
             "127.0.0.1:8090".parse().unwrap(),
             "127.0.0.1:8091".parse().unwrap(),
         ]),
     );
+
+    let mut locs_b = HashMap::new();
+    locs_b.insert(
+        "/".to_owned(),
+        Upstream::new(vec![
+            "127.0.0.1:8092".parse().unwrap(),
+            "127.0.0.1:8093".parse().unwrap(),
+        ]),
+    );
+
     let config = ConfigBuilder::new()
-        .with_http_proxy_servers(vec![HttpProxy::new(
-            9080,
-            locs,
-            "certs/sample.pem",
-            "certs/sample.rsa",
-        )])
+        .with_http_proxy_servers(vec![
+            HttpProxy::new(9080, locs_a, "certs/sample.pem", "certs/sample.rsa"),
+            HttpProxy::new(9081, locs_b, "certs/sample.pem", "certs/sample.rsa"),
+        ])
         .build();
+
     let _ = tokio::join!(
         tcp::start_tcp_proxy(),
-        http::start_http_proxy(config.http_proxies.unwrap())
+        http::start_http_proxies(config.http_proxies.unwrap())
     );
     Ok(())
 }

@@ -6,15 +6,15 @@ use std::path::{Path, PathBuf};
 use crate::error::HyperPassError;
 use crate::loadbalance::LoadBalancer;
 use crate::proxy::Proxy;
-use http_body_util::{BodyExt, combinators::BoxBody};
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use log::*;
-use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
@@ -60,71 +60,76 @@ impl Proxy for HttpProxy {
     fn route(&self) {}
 }
 
-pub async fn start_http_proxy(proxies: Vec<HttpProxy>) -> Result<(), HyperPassError> {
+pub async fn start_http_proxies(proxies: Vec<HttpProxy>) -> Result<(), HyperPassError> {
     for proxy in proxies {
-        let listener = TcpListener::bind(format!("0.0.0.0:{}", proxy.port))
-            .await
-            .map_err(|e| {
-                error!("couldnt bind to port: {e}");
-                HyperPassError::HttpServerStartError
-            })?;
+        tokio::spawn(http_listener_loop(proxy));
+    }
 
-        let lb = Arc::new(LoadBalancer::new(
-            proxy
-                .locations
-                .values()
-                .flat_map(|u| u.servers.clone())
-                .collect(),
-        ));
+    Ok(())
+}
 
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let certs = CertificateDer::pem_file_iter(proxy.ssl_server_cert_path)
-            .map_err(|e| {
-                error!("couldn't load cert: {e}");
-                HyperPassError::CertLoadError
-            })?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                error!("couldn't load cert: {e}");
-                HyperPassError::CertLoadError
-            })?;
-        info!("cert loaded");
-        let key = PrivateKeyDer::from_pem_file(proxy.ssl_server_key_path).map_err(|e| {
-            error!("couldn't load private key: {e}");
-            HyperPassError::KeyLoadError
+async fn http_listener_loop(proxy: HttpProxy) -> Result<(), HyperPassError> {
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", proxy.port))
+        .await
+        .map_err(|e| {
+            error!("couldnt bind to port: {e}");
+            HyperPassError::HttpServerStartError
         })?;
-        info!("key loaded");
-        let mut server_config = ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .map_err(|e| {
-                error!("{e}");
-                HyperPassError::ServerConfigError
-            })?;
-        server_config.alpn_protocols =
-            vec![b"http/1.1".to_vec(), b"http/1.0".to_vec(), b"h2".to_vec()];
 
-        let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
+    let lb = Arc::new(LoadBalancer::new(
+        proxy
+            .locations
+            .values()
+            .flat_map(|u| u.servers.clone())
+            .collect(),
+    ));
 
-        debug!("http server listening ...");
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let certs = CertificateDer::pem_file_iter(proxy.ssl_server_cert_path)
+        .map_err(|e| {
+            error!("couldn't load cert: {e}");
+            HyperPassError::CertLoadError
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| {
+            error!("couldn't load cert: {e}");
+            HyperPassError::CertLoadError
+        })?;
+    info!("cert loaded");
+    let key = PrivateKeyDer::from_pem_file(proxy.ssl_server_key_path).map_err(|e| {
+        error!("couldn't load private key: {e}");
+        HyperPassError::KeyLoadError
+    })?;
+    info!("key loaded");
+    let mut server_config = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| {
+            error!("{e}");
+            HyperPassError::ServerConfigError
+        })?;
+    server_config.alpn_protocols = vec![b"http/1.1".to_vec(), b"http/1.0".to_vec(), b"h2".to_vec()];
 
-        while let Ok((sock, addr)) = listener.accept().await {
-            let lb = lb.clone();
-            let tls_acceptor = tls_acceptor.clone();
+    let tls_acceptor = TlsAcceptor::from(Arc::new(server_config));
 
-            tokio::spawn(async move {
-                match tls_acceptor.accept(sock).await {
-                    Ok(server_tls_stream) => {
-                        if let Err(e) = handle_http_connection(lb, server_tls_stream).await {
-                            error!("Error handling connection from {}: {:?}", addr, e);
-                        }
-                    }
-                    Err(e) => {
-                        error!("TLS handshake failed for {}: {:?}", addr, e);
+    info!("http server listening ...");
+
+    while let Ok((sock, addr)) = listener.accept().await {
+        let lb = lb.clone();
+        let tls_acceptor = tls_acceptor.clone();
+
+        tokio::spawn(async move {
+            match tls_acceptor.accept(sock).await {
+                Ok(server_tls_stream) => {
+                    if let Err(e) = handle_http_connection(lb, server_tls_stream).await {
+                        error!("Error handling connection from {}: {:?}", addr, e);
                     }
                 }
-            });
-        }
+                Err(e) => {
+                    error!("TLS handshake failed for {}: {:?}", addr, e);
+                }
+            }
+        });
     }
 
     Ok(())
