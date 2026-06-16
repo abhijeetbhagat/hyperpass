@@ -14,12 +14,22 @@ mod tcp;
 async fn main() -> io::Result<()> {
     env_logger::init();
 
+    #[cfg(feature = "dev")]
+    console_subscriber::init();
+
     let mut locs_a = HashMap::new();
     locs_a.insert(
         "/".to_owned(),
         Upstream::new(vec![
             "127.0.0.1:8090".parse().unwrap(),
             "127.0.0.1:8091".parse().unwrap(),
+        ]),
+    );
+    locs_a.insert(
+        "/foo".to_owned(),
+        Upstream::new(vec![
+            "127.0.0.1:8190".parse().unwrap(),
+            "127.0.0.1:8191".parse().unwrap(),
         ]),
     );
 

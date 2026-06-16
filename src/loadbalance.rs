@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+#[derive(Debug)]
 pub struct LoadBalancer {
     servers: Vec<SocketAddr>,
     cur_server: AtomicUsize,

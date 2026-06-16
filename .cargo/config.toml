@@ -1,0 +1,2 @@
+[alias]
+dev = "run --no-default-features --features dev"
