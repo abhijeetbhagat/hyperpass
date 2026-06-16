@@ -1,8 +1,8 @@
 use log::debug;
+use log::*;
 use std::io;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
-use log::*;
 
 pub async fn start_tcp_proxy() -> io::Result<()> {
     let listener = TcpListener::bind("0.0.0.0:8080").await?;
