@@ -1,12 +1,13 @@
 use std::io;
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::error::HyperPassError;
 use crate::loadbalance::LoadBalancer;
 use crate::proxy::Proxy;
-use http_body_util::{combinators::BoxBody, BodyExt, Full};
-use hyper::body::{Bytes, Incoming};
+use http_body_util::{combinators::BoxBody, BodyExt};
+use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
@@ -35,11 +36,23 @@ impl Upstream {
 pub struct HttpProxy {
     port: u16,
     locations: HashMap<String, Upstream>,
+    ssl_server_cert_path: PathBuf,
+    ssl_server_key_path: PathBuf,
 }
 
 impl HttpProxy {
-    pub fn new(port: u16, locations: HashMap<String, Upstream>) -> Self {
-        Self { port, locations }
+    pub fn new(
+        port: u16,
+        locations: HashMap<String, Upstream>,
+        ssl_server_cert_path: impl AsRef<Path>,
+        ssl_server_key_path: impl AsRef<Path>,
+    ) -> Self {
+        Self {
+            port,
+            locations,
+            ssl_server_cert_path: ssl_server_cert_path.as_ref().to_owned(),
+            ssl_server_key_path: ssl_server_key_path.as_ref().to_owned(),
+        }
     }
 }
 
@@ -65,7 +78,7 @@ pub async fn start_http_proxy(proxies: Vec<HttpProxy>) -> Result<(), HyperPassEr
         ));
 
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let certs = CertificateDer::pem_file_iter("certs/sample.pem")
+        let certs = CertificateDer::pem_file_iter(proxy.ssl_server_cert_path)
             .map_err(|e| {
                 error!("couldn't load cert: {e}");
                 HyperPassError::CertLoadError
@@ -76,10 +89,11 @@ pub async fn start_http_proxy(proxies: Vec<HttpProxy>) -> Result<(), HyperPassEr
                 HyperPassError::CertLoadError
             })?;
         info!("cert loaded");
-        let key = PrivateKeyDer::from_pem_file("certs/sample.rsa").map_err(|e| {
+        let key = PrivateKeyDer::from_pem_file(proxy.ssl_server_key_path).map_err(|e| {
             error!("couldn't load private key: {e}");
             HyperPassError::KeyLoadError
         })?;
+        info!("key loaded");
         let mut server_config = ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(certs, key)
@@ -121,9 +135,9 @@ async fn handle_http_connection(
     in_sock: tokio_rustls::server::TlsStream<TcpStream>,
 ) -> io::Result<()> {
     let io = TokioIo::new(in_sock);
-    let addr = lb.next(); //"localhost:8090";
+    let addr = lb.next();
 
-    let result = ServerBuilder::new()
+    let _result = ServerBuilder::new()
         .serve_connection(
             io,
             service_fn(async |req: Request<Incoming>| {
@@ -159,32 +173,4 @@ async fn handle_http_connection(
         )
         .await;
     Ok(())
-}
-
-async fn service(
-    req: Request<Incoming>,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, HyperPassError> {
-    debug!("req recvd");
-
-    let out_sock = TcpStream::connect("localhost:8090").await.map_err(|e| {
-        error!("{e}");
-        HyperPassError::UpstreamTCPConnFailed
-    })?;
-    let io = TokioIo::new(out_sock);
-    let (mut sender, conn) = ClientBuilder::new().handshake(io).await.map_err(|e| {
-        error!("{e}");
-        HyperPassError::UpstreamHandshakeFailed
-    })?;
-    tokio::spawn(async {
-        if let Err(e) = conn.await {
-            debug!("err: {}", e);
-        }
-    });
-
-    let resp = sender.send_request(req).await.map_err(|e| {
-        error!("{e}");
-        HyperPassError::UpstreamRequestError
-    })?;
-
-    Ok(resp.map(|b| b.boxed()))
 }

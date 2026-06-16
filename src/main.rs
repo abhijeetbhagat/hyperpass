@@ -23,7 +23,12 @@ async fn main() -> io::Result<()> {
         ]),
     );
     let config = ConfigBuilder::new()
-        .with_http_proxy_servers(vec![HttpProxy::new(9080, locs)])
+        .with_http_proxy_servers(vec![HttpProxy::new(
+            9080,
+            locs,
+            "certs/sample.pem",
+            "certs/sample.rsa",
+        )])
         .build();
     let _ = tokio::join!(
         tcp::start_tcp_proxy(),

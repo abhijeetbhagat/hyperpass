@@ -7,7 +7,7 @@ use log::*;
 pub async fn start_tcp_proxy() -> io::Result<()> {
     let listener = TcpListener::bind("0.0.0.0:8080").await?;
     info!("tcp server listening ...");
-    while let Ok((sock, addr)) = listener.accept().await {
+    while let Ok((sock, _addr)) = listener.accept().await {
         tokio::spawn(async move { handle_connection(sock).await });
     }
 

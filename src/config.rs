@@ -1,10 +1,7 @@
-use std::collections::HashMap;
-use std::{net::SocketAddr, path::Path};
+use std::path::Path;
 
 use crate::http::HttpProxy;
 use crate::proxy::Proxy;
-use nginx_discovery::extract::servers;
-use nginx_discovery::NginxDiscovery;
 
 use crate::error::HyperPassError;
 
@@ -18,7 +15,7 @@ trait Config {
 }
 
 impl Config for ConfigType {
-    fn parse(&self, path: impl AsRef<Path>) -> HyperPassConfig {
+    fn parse(&self, _path: impl AsRef<Path>) -> HyperPassConfig {
         match self {
             ConfigType::Nginx => todo!(), // NginxParser::parse(path),
             ConfigType::Json => todo!(),
@@ -65,7 +62,7 @@ impl ConfigBuilder {
 struct NginxParser;
 
 impl NginxParser {
-    fn parse(path: impl AsRef<Path>) -> Result<HyperPassConfig, HyperPassError> {
+    fn parse(_path: impl AsRef<Path>) -> Result<HyperPassConfig, HyperPassError> {
         // let config = NginxDiscovery::from_config_file(path).map_err(|e| {
         //     log::error!("e");
         //     HyperPassError::ConfigReadError
