@@ -8,12 +8,9 @@ pub struct LoadBalancer {
 }
 
 impl LoadBalancer {
-    pub fn new() -> Self {
+    pub fn new(servers: Vec<SocketAddr>) -> Self {
         Self {
-            servers: vec![
-                "127.0.0.1:8090".parse().unwrap(),
-                "127.0.0.1:8091".parse().unwrap(),
-            ],
+            servers,
             cur_server: AtomicUsize::new(0),
         }
     }

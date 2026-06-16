@@ -18,4 +18,6 @@ pub enum HyperPassError {
     HttpServerStartError,
     #[error("tls handshake error")]
     TlsHandshakeError,
+    #[error("config read error")]
+    ConfigReadError,
 }
