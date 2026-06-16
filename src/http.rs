@@ -4,17 +4,17 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::error::HyperPassError;
-use crate::loadbalance::LoadBalancer;
+use crate::loadbalance::RRLoadBalancer;
 use crate::proxy::Proxy;
-use http_body_util::{BodyExt, combinators::BoxBody};
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use log::*;
-use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
@@ -24,11 +24,11 @@ type ServerBuilder = hyper::server::conn::http1::Builder;
 type ClientBuilder = hyper::client::conn::http1::Builder;
 
 pub struct Upstream {
-    pub servers: Vec<SocketAddr>,
+    pub servers: Vec<(SocketAddr, u8)>,
 }
 
 impl Upstream {
-    pub fn new(servers: Vec<SocketAddr>) -> Self {
+    pub fn new(servers: Vec<(SocketAddr, u8)>) -> Self {
         Self { servers }
     }
 }
@@ -86,10 +86,10 @@ async fn http_listener_loop(proxy: HttpProxy) -> Result<(), HyperPassError> {
 
     let tls_acceptor = TlsAcceptor::from(Arc::new(tls_config(&proxy)?));
 
-    let lb_map: HashMap<String, LoadBalancer> = proxy
+    let lb_map: HashMap<String, RRLoadBalancer> = proxy
         .locations
         .into_iter()
-        .map(|(k, v)| (k, LoadBalancer::new(v.servers)))
+        .map(|(k, v)| (k, RRLoadBalancer::new(v.servers)))
         .collect();
 
     info!("{:?}", lb_map);
@@ -150,7 +150,7 @@ fn tls_config(proxy: &HttpProxy) -> Result<ServerConfig, HyperPassError> {
 }
 
 async fn handle_http_connection(
-    lb_map: Arc<HashMap<String, LoadBalancer>>,
+    lb_map: Arc<HashMap<String, RRLoadBalancer>>,
     in_sock: tokio_rustls::server::TlsStream<TcpStream>,
 ) -> io::Result<()> {
     let io = TokioIo::new(in_sock);

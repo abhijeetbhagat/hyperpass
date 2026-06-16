@@ -21,15 +21,15 @@ async fn main() -> io::Result<()> {
     locs_a.insert(
         "/".to_owned(),
         Upstream::new(vec![
-            "127.0.0.1:8090".parse().unwrap(),
-            "127.0.0.1:8091".parse().unwrap(),
+            ("127.0.0.1:8090".parse().unwrap(), 2),
+            ("127.0.0.1:8091".parse().unwrap(), 3),
         ]),
     );
     locs_a.insert(
         "/foo".to_owned(),
         Upstream::new(vec![
-            "127.0.0.1:8190".parse().unwrap(),
-            "127.0.0.1:8191".parse().unwrap(),
+            ("127.0.0.1:8190".parse().unwrap(), 3),
+            ("127.0.0.1:8191".parse().unwrap(), 2),
         ]),
     );
 
@@ -37,8 +37,8 @@ async fn main() -> io::Result<()> {
     locs_b.insert(
         "/".to_owned(),
         Upstream::new(vec![
-            "127.0.0.1:8092".parse().unwrap(),
-            "127.0.0.1:8093".parse().unwrap(),
+            ("127.0.0.1:8092".parse().unwrap(), 1),
+            ("127.0.0.1:8093".parse().unwrap(), 1),
         ]),
     );
 
