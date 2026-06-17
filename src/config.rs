@@ -4,6 +4,7 @@ use crate::http::HttpProxy;
 use crate::proxy::Proxy;
 
 use crate::error::HyperPassError;
+use crate::tcp::TcpProxy;
 
 enum ConfigType {
     Nginx,
@@ -25,12 +26,12 @@ impl Config for ConfigType {
 
 pub struct HyperPassConfig {
     pub http_proxies: Option<Vec<HttpProxy>>,
-    tcp_proxies: Option<Vec<Box<dyn Proxy>>>,
+    pub tcp_proxies: Option<Vec<TcpProxy>>,
 }
 
 pub struct ConfigBuilder {
     http_proxies: Option<Vec<HttpProxy>>,
-    tcp_proxies: Option<Vec<Box<dyn Proxy>>>,
+    tcp_proxies: Option<Vec<TcpProxy>>,
 }
 
 impl ConfigBuilder {
@@ -46,7 +47,7 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn with_tcp_proxy_servers(mut self, servers: Vec<Box<dyn Proxy>>) -> Self {
+    pub fn with_tcp_proxy_servers(mut self, servers: Vec<TcpProxy>) -> Self {
         self.tcp_proxies = Some(servers);
         self
     }

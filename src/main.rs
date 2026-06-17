@@ -1,7 +1,9 @@
 use std::{collections::HashMap, io};
 
 use crate::config::ConfigBuilder;
-use crate::http::{HttpProxy, Upstream};
+use crate::http::HttpProxy;
+use crate::tcp::TcpProxy;
+use crate::upstream::Upstream;
 
 mod config;
 mod error;
@@ -9,6 +11,7 @@ mod http;
 mod loadbalance;
 mod proxy;
 mod tcp;
+mod upstream;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -42,15 +45,25 @@ async fn main() -> io::Result<()> {
         ]),
     );
 
+    let mut locs_c = HashMap::new();
+    locs_c.insert(
+        "/".to_owned(),
+        Upstream::new(vec![
+            ("127.0.0.1:8290".parse().unwrap(), 1),
+            ("127.0.0.1:8291".parse().unwrap(), 1),
+        ]),
+    );
+
     let config = ConfigBuilder::new()
         .with_http_proxy_servers(vec![
             HttpProxy::new(9080, locs_a, "certs/sample.pem", "certs/sample.rsa"),
             HttpProxy::new(9081, locs_b, "certs/sample.pem", "certs/sample.rsa"),
         ])
+        .with_tcp_proxy_servers(vec![TcpProxy::new(9085, locs_c)])
         .build();
 
     let _ = tokio::join!(
-        tcp::start_tcp_proxy(),
+        tcp::start_tcp_proxies(config.tcp_proxies.unwrap()),
         http::start_http_proxies(config.http_proxies.unwrap())
     );
     Ok(())

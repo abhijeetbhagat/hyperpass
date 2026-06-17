@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use crate::error::HyperPassError;
 use crate::loadbalance::RRLoadBalancer;
 use crate::proxy::Proxy;
+use crate::upstream::Upstream;
+use futures::future::join_all;
 use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
@@ -15,23 +17,13 @@ use log::*;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::ServerConfig;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
 type ServerBuilder = hyper::server::conn::http1::Builder;
 type ClientBuilder = hyper::client::conn::http1::Builder;
-
-pub struct Upstream {
-    pub servers: Vec<(SocketAddr, u8)>,
-}
-
-impl Upstream {
-    pub fn new(servers: Vec<(SocketAddr, u8)>) -> Self {
-        Self { servers }
-    }
-}
 
 pub struct HttpProxy {
     port: u16,
@@ -61,17 +53,22 @@ impl Proxy for HttpProxy {
 }
 
 pub async fn start_http_proxies(proxies: Vec<HttpProxy>) -> Result<(), HyperPassError> {
-    for proxy in proxies {
-        #[cfg(feature = "dev")]
-        {
-            tokio::task::Builder::new()
-                .name("listener loop")
-                .spawn(http_listener_loop(proxy));
-        }
+    let handles: Vec<JoinHandle<Result<(), HyperPassError>>> = proxies
+        .into_iter()
+        .map(|proxy| {
+            #[cfg(feature = "dev")]
+            {
+                tokio::task::Builder::new()
+                    .name("listener loop")
+                    .spawn(http_listener_loop(proxy))
+            }
 
-        #[cfg(not(feature = "dev"))]
-        tokio::spawn(http_listener_loop(proxy));
-    }
+            #[cfg(not(feature = "dev"))]
+            tokio::spawn(http_listener_loop(proxy))
+        })
+        .collect();
+
+    join_all(handles).await;
 
     Ok(())
 }
