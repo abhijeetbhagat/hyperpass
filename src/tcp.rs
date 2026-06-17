@@ -6,6 +6,8 @@ use log::debug;
 use log::*;
 use std::collections::HashMap;
 use std::io;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::io::copy_bidirectional;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
@@ -41,17 +43,27 @@ async fn tcp_listener_loop(proxy: TcpProxy) -> Result<(), HyperPassError> {
         })?;
 
     info!("tcp server listening on {} ...", proxy.port);
+    let TcpProxy {
+        port,
+        mut locations,
+    } = proxy;
+
+    let servers: Vec<(SocketAddr, u8)> = locations.remove(&port.to_string()).unwrap().servers;
+    let lb = Arc::new(RRLoadBalancer::new(servers));
 
     while let Ok((sock, _addr)) = listener.accept().await {
-        tokio::spawn(async move { handle_connection(sock).await });
+        let lb = lb.clone();
+        tokio::spawn(async move { handle_connection(lb, sock).await });
     }
 
     Ok(())
 }
 
-async fn handle_connection(mut in_sock: TcpStream) -> io::Result<()> {
+async fn handle_connection(lb: Arc<RRLoadBalancer>, mut in_sock: TcpStream) -> io::Result<()> {
     debug!("{:?}", in_sock.peer_addr());
-    let mut out_sock = TcpStream::connect("0.0.0.0:8081").await?;
+    let addr = lb.next();
+
+    let mut out_sock = TcpStream::connect(addr).await?;
     copy_bidirectional(&mut in_sock, &mut out_sock).await?;
     Ok(())
 }

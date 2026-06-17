@@ -47,7 +47,7 @@ async fn main() -> io::Result<()> {
 
     let mut locs_c = HashMap::new();
     locs_c.insert(
-        "/".to_owned(),
+        "9085".to_owned(),
         Upstream::new(vec![
             ("127.0.0.1:8290".parse().unwrap(), 1),
             ("127.0.0.1:8291".parse().unwrap(), 1),
