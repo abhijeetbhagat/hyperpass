@@ -2,14 +2,18 @@ use std::{collections::HashMap, io};
 
 use crate::config::ConfigBuilder;
 use crate::http::HttpProxy;
+use crate::shutdown::ShutdownHandler;
 use crate::tcp::TcpProxy;
 use crate::upstream::Upstream;
+use log::*;
+use std::sync::Arc;
 
 mod config;
 mod error;
 mod http;
 mod loadbalance;
 mod proxy;
+mod shutdown;
 mod tcp;
 mod upstream;
 
@@ -62,9 +66,29 @@ async fn main() -> io::Result<()> {
         .with_tcp_proxy_servers(vec![TcpProxy::new(9085, locs_c)])
         .build();
 
+    let shutdown_handler = Arc::new(ShutdownHandler::new());
+
     let _ = tokio::join!(
-        tcp::start_tcp_proxies(config.tcp_proxies.unwrap()),
-        http::start_http_proxies(config.http_proxies.unwrap())
+        async {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("shutting down tcp proxies");
+                },
+                _ = tcp::start_tcp_proxies(config.tcp_proxies.unwrap(), shutdown_handler.clone()) => {},
+            }
+        },
+        async {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    info!("shutting down http proxies");
+                },
+                _ = http::start_http_proxies(config.http_proxies.unwrap()) => {}
+            }
+        }
     );
+
+    shutdown_handler.shutdown().await;
+    info!("fin");
+
     Ok(())
 }
