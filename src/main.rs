@@ -82,7 +82,7 @@ async fn main() -> io::Result<()> {
                 _ = tokio::signal::ctrl_c() => {
                     info!("shutting down http proxies");
                 },
-                _ = http::start_http_proxies(config.http_proxies.unwrap()) => {}
+                _ = http::start_http_proxies(config.http_proxies.unwrap(), shutdown_handler.clone()) => {}
             }
         }
     );

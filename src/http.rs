@@ -6,17 +6,18 @@ use std::path::{Path, PathBuf};
 use crate::error::HyperPassError;
 use crate::loadbalance::RRLoadBalancer;
 use crate::proxy::Proxy;
+use crate::shutdown::ShutdownHandler;
 use crate::upstream::Upstream;
 use futures::future::join_all;
-use http_body_util::{BodyExt, combinators::BoxBody};
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use log::*;
-use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
@@ -52,7 +53,10 @@ impl Proxy for HttpProxy {
     fn route(&self) {}
 }
 
-pub async fn start_http_proxies(proxies: Vec<HttpProxy>) -> Result<(), HyperPassError> {
+pub async fn start_http_proxies(
+    proxies: Vec<HttpProxy>,
+    shutdown_handler: Arc<ShutdownHandler>,
+) -> Result<(), HyperPassError> {
     let handles: Vec<JoinHandle<Result<(), HyperPassError>>> = proxies
         .into_iter()
         .map(|proxy| {
@@ -64,7 +68,8 @@ pub async fn start_http_proxies(proxies: Vec<HttpProxy>) -> Result<(), HyperPass
             }
 
             #[cfg(not(feature = "dev"))]
-            tokio::spawn(http_listener_loop(proxy))
+            let shutdown_handler = shutdown_handler.clone();
+            shutdown_handler.spawn(http_listener_loop(proxy, shutdown_handler.clone()))
         })
         .collect();
 
@@ -73,7 +78,10 @@ pub async fn start_http_proxies(proxies: Vec<HttpProxy>) -> Result<(), HyperPass
     Ok(())
 }
 
-async fn http_listener_loop(proxy: HttpProxy) -> Result<(), HyperPassError> {
+async fn http_listener_loop(
+    proxy: HttpProxy,
+    shutdown_handler: Arc<ShutdownHandler>,
+) -> Result<(), HyperPassError> {
     let listener = TcpListener::bind(format!("0.0.0.0:{}", proxy.port))
         .await
         .map_err(|e| {
@@ -95,22 +103,33 @@ async fn http_listener_loop(proxy: HttpProxy) -> Result<(), HyperPassError> {
 
     info!("http server listening on {} ...", proxy.port);
 
-    while let Ok((sock, addr)) = listener.accept().await {
-        let lb_map = lb_map.clone();
-        let tls_acceptor = tls_acceptor.clone();
+    loop {
+        tokio::select! {
+            _ = shutdown_handler.shutdown_signalled() => { break },
+            pair = listener.accept() => {
+                match pair {
+                    Ok((sock, addr)) => {
+                        let lb_map = lb_map.clone();
+                        let tls_acceptor = tls_acceptor.clone();
+                        let shutdown_handler_clone = shutdown_handler.clone();
 
-        tokio::spawn(async move {
-            match tls_acceptor.accept(sock).await {
-                Ok(server_tls_stream) => {
-                    if let Err(e) = handle_http_connection(lb_map, server_tls_stream).await {
-                        error!("Error handling connection from {}: {:?}", addr, e);
+                        shutdown_handler.spawn(async move {
+                            match tls_acceptor.accept(sock).await {
+                                Ok(server_tls_stream) => {
+                                    if let Err(e) = handle_http_connection(lb_map, server_tls_stream, shutdown_handler_clone).await {
+                                        error!("Error handling connection from {}: {:?}", addr, e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("TLS handshake failed for {}: {:?}", addr, e);
+                                }
+                            }
+                        });
                     }
-                }
-                Err(e) => {
-                    error!("TLS handshake failed for {}: {:?}", addr, e);
+                    _ => break
                 }
             }
-        });
+        }
     }
 
     Ok(())
@@ -149,6 +168,7 @@ fn tls_config(proxy: &HttpProxy) -> Result<ServerConfig, HyperPassError> {
 async fn handle_http_connection(
     lb_map: Arc<HashMap<String, RRLoadBalancer>>,
     in_sock: tokio_rustls::server::TlsStream<TcpStream>,
+    shutdown_handler: Arc<ShutdownHandler>,
 ) -> io::Result<()> {
     let io = TokioIo::new(in_sock);
 
@@ -172,7 +192,7 @@ async fn handle_http_connection(
                     HyperPassError::UpstreamHandshakeFailed
                 })?;
 
-                tokio::spawn(async {
+                shutdown_handler.spawn(async {
                     if let Err(e) = conn.await {
                         debug!("err: {}", e);
                     }
@@ -189,5 +209,6 @@ async fn handle_http_connection(
             }),
         )
         .await;
+
     Ok(())
 }
