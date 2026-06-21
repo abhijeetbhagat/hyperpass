@@ -1,14 +1,15 @@
 use crate::error::HyperPassError;
 use crate::upstream::Upstream;
 use log::*;
-use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub struct HttpProxy {
     pub port: u16,
+    pub num_conns: u8,
     pub locations: HashMap<String, Upstream>,
     pub ssl_server_cert_path: PathBuf,
     pub ssl_server_key_path: PathBuf,
@@ -17,12 +18,14 @@ pub struct HttpProxy {
 impl HttpProxy {
     pub fn new(
         port: u16,
+        num_conns: u8,
         locations: HashMap<String, Upstream>,
         ssl_server_cert_path: impl AsRef<Path>,
         ssl_server_key_path: impl AsRef<Path>,
     ) -> Self {
         Self {
             port,
+            num_conns,
             locations,
             ssl_server_cert_path: ssl_server_cert_path.as_ref().to_owned(),
             ssl_server_key_path: ssl_server_key_path.as_ref().to_owned(),

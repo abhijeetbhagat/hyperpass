@@ -15,7 +15,7 @@ type ClientBuilder = hyper::client::conn::http1::Builder;
 pub struct InnerConnection(SendRequest<Incoming>);
 
 pub struct HyperPassConnection {
-    route: String,
+    addr: SocketAddr,
     inner: Option<InnerConnection>,
     pool: Arc<InnerPool>,
 }
@@ -25,7 +25,7 @@ impl Drop for HyperPassConnection {
     fn drop(&mut self) {
         if let Some(inner) = self.inner.take() {
             debug!("adding conn back to pool");
-            let _ = self.pool.conns.get_mut(&self.route).unwrap().push(inner);
+            let _ = self.pool.conns.get_mut(&self.addr).unwrap().push(inner);
         }
     }
 }
@@ -36,20 +36,21 @@ pub struct ConnectionPool {
 }
 
 struct InnerPool {
-    conns: DashMap<String, ArrayQueue<InnerConnection>>,
+    conns: DashMap<SocketAddr, ArrayQueue<InnerConnection>>,
 }
 
 impl ConnectionPool {
     pub async fn new(
-        addrs: &HashMap<String, Vec<SocketAddr>>,
+        num_conns: u8,
+        addrs: &[SocketAddr],
         shutdown_handler: Arc<ShutdownHandler>,
     ) -> Result<Self, HyperPassError> {
         let conns = DashMap::new();
 
-        for (k, v) in addrs {
-            let queue = ArrayQueue::new(addrs.len());
+        for addr in addrs {
+            let queue = ArrayQueue::new(num_conns as usize);
 
-            for addr in v.iter() {
+            for _ in 0..num_conns {
                 let out_sock = TcpStream::connect(addr).await.map_err(|e| {
                     error!("failed to connect to {addr}: {e}");
                     HyperPassError::UpstreamTCPConnFailed
@@ -73,7 +74,7 @@ impl ConnectionPool {
                 // pool.add_conn(InnerConnection(sender));
             }
 
-            conns.insert(k.to_owned(), queue);
+            conns.insert(addr.to_owned(), queue);
         }
 
         let inner = InnerPool { conns };
@@ -88,11 +89,11 @@ impl ConnectionPool {
     //     let _ = self.inner.conns.push(conn);
     // }
 
-    fn get_conn(&self, route: &str) -> Option<HyperPassConnection> {
-        if let Some(queue) = self.inner.conns.get_mut(route) {
+    fn get_conn(&self, addr: &SocketAddr) -> Option<HyperPassConnection> {
+        if let Some(queue) = self.inner.conns.get_mut(addr) {
             queue.pop().map(|conn| {
                 Some(HyperPassConnection {
-                    route: route.to_owned(),
+                    addr: addr.to_owned(),
                     inner: Some(conn),
                     pool: self.inner.clone(),
                 })
@@ -104,11 +105,12 @@ impl ConnectionPool {
 
     pub async fn send_request(
         &self,
+        addr: &SocketAddr,
         req: Request<Incoming>,
     ) -> Result<Response<BoxBody<hyper::body::Bytes, hyper::Error>>, HyperPassError> {
         debug!("pool len: {}", self.inner.conns.len());
 
-        if let Some(mut conn) = self.get_conn(req.uri().path()) {
+        if let Some(mut conn) = self.get_conn(addr) {
             let resp = conn
                 .inner
                 .as_mut()

@@ -71,14 +71,15 @@ async fn http_listener_loop(
 
     let lb_map = Arc::new(lb_map);
 
-    let map: HashMap<String, Vec<SocketAddr>> = proxy
+    let map: Vec<SocketAddr> = proxy
         .locations
-        .into_iter()
-        .map(|(k, v)| (k, v.servers.iter().map(|tuple| tuple.0).collect()))
+        .into_values()
+        .flat_map(|v| v.servers)
+        .map(|tuple| tuple.0)
         .collect();
 
     let pool = Arc::new(
-        ConnectionPool::new(&map, shutdown_handler.clone())
+        ConnectionPool::new(proxy.num_conns, &map, shutdown_handler.clone())
             .await
             .map_err(|e| {
                 error!("{e}");
@@ -101,7 +102,7 @@ async fn http_listener_loop(
                         shutdown_handler.spawn(async move {
                             match tls_acceptor.accept(sock).await {
                                 Ok(server_tls_stream) => {
-                                    if let Err(e) = handle_http_connection(pool, server_tls_stream).await {
+                                    if let Err(e) = handle_http_connection(lb_map, pool, server_tls_stream).await {
                                         error!("Error handling connection from {}: {:?}", addr, e);
                                     }
                                 }
@@ -121,6 +122,7 @@ async fn http_listener_loop(
 }
 
 async fn handle_http_connection(
+    lb_map: Arc<HashMap<String, RRLoadBalancer>>,
     pool: Arc<ConnectionPool>,
     in_sock: tokio_rustls::server::TlsStream<TcpStream>,
 ) -> io::Result<()> {
@@ -131,7 +133,10 @@ async fn handle_http_connection(
             io,
             service_fn(async |req: Request<Incoming>| {
                 info!("{:?}", req);
-                pool.send_request(req).await
+
+                let lb = lb_map.get(&req.uri().to_string()).unwrap();
+                let addr = lb.next();
+                pool.send_request(&addr, req).await
             }),
         )
         .await;

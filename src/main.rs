@@ -62,8 +62,8 @@ async fn main() -> io::Result<()> {
 
     let config = ConfigBuilder::new()
         .with_http_proxy_servers(vec![
-            HttpProxy::new(9080, locs_a, "certs/sample.pem", "certs/sample.rsa"),
-            HttpProxy::new(9081, locs_b, "certs/sample.pem", "certs/sample.rsa"),
+            HttpProxy::new(9080, 5, locs_a, "certs/sample.pem", "certs/sample.rsa"),
+            HttpProxy::new(9081, 4, locs_b, "certs/sample.pem", "certs/sample.rsa"),
         ])
         .with_tcp_proxy_servers(vec![TcpProxy::new(9085, locs_c)])
         .build();
