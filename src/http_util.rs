@@ -1,9 +1,9 @@
 use crate::error::HyperPassError;
 use crate::upstream::Upstream;
 use log::*;
+use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::ServerConfig;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

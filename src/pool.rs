@@ -2,11 +2,11 @@ use std::net::SocketAddr;
 
 use crate::{error::HyperPassError, shutdown::ShutdownHandler};
 use crossbeam::queue::ArrayQueue;
-use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::{body::Incoming, client::conn::http1::SendRequest, Request, Response};
-use hyper_util::{client::legacy::connect::Connection, rt::TokioIo};
+use http_body_util::{BodyExt, combinators::BoxBody};
+use hyper::{Request, Response, body::Incoming, client::conn::http1::SendRequest};
+use hyper_util::rt::TokioIo;
 use log::*;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use tokio::net::TcpStream;
 
 type ClientBuilder = hyper::client::conn::http1::Builder;
@@ -15,16 +15,15 @@ pub struct InnerConnection(SendRequest<Incoming>);
 
 pub struct HyperPassConnection {
     inner: Option<InnerConnection>,
-    pool: Weak<InnerPool>,
+    pool: Arc<InnerPool>,
 }
 
 impl Drop for HyperPassConnection {
     /// returns connection back to the pool
     fn drop(&mut self) {
         if let Some(inner) = self.inner.take() {
-            let pool = self.pool.upgrade().unwrap();
             debug!("adding conn back to pool");
-            let _ = pool.conns.push(inner);
+            let _ = self.pool.conns.push(inner);
         }
     }
 }
@@ -82,7 +81,7 @@ impl ConnectionPool {
         self.inner.conns.pop().map(|conn| {
             Some(HyperPassConnection {
                 inner: Some(conn),
-                pool: Arc::downgrade(&self.inner),
+                pool: self.inner.clone(),
             })
         })?
     }
