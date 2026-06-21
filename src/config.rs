@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::http::HttpProxy;
+use crate::http_util::HttpProxy;
 use crate::proxy::Proxy;
 
 use crate::error::HyperPassError;

@@ -23,4 +23,9 @@ pub enum HyperPassError {
 
     #[error("tcp server start error")]
     TcpServerBindError,
+
+    #[error("connection pool empty")]
+    ConnectionPoolEmptyError,
+    #[error("connection pool creation error")]
+    ConnectionPoolCreationError,
 }

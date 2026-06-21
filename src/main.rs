@@ -1,7 +1,7 @@
 use std::{collections::HashMap, io};
 
 use crate::config::ConfigBuilder;
-use crate::http::HttpProxy;
+use crate::http_util::HttpProxy;
 use crate::shutdown::ShutdownHandler;
 use crate::tcp::TcpProxy;
 use crate::upstream::Upstream;
@@ -11,7 +11,9 @@ use std::sync::Arc;
 mod config;
 mod error;
 mod http;
+mod http_util;
 mod loadbalance;
+mod pool;
 mod proxy;
 mod shutdown;
 mod tcp;
