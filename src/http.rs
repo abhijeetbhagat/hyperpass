@@ -1,15 +1,16 @@
 use std::io;
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use crate::error::HyperPassError;
-use crate::http_util::{HttpProxy, tls_config};
+use crate::http_util::{tls_config, HttpProxy};
 use crate::loadbalance::RRLoadBalancer;
 use crate::pool::ConnectionPool;
 use crate::shutdown::ShutdownHandler;
 use futures::future::join_all;
-use http_body_util::{BodyExt, combinators::BoxBody};
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
@@ -62,27 +63,27 @@ async fn http_listener_loop(
 
     let lb_map: HashMap<String, RRLoadBalancer> = proxy
         .locations
-        .into_iter()
-        .map(|(k, v)| (k, RRLoadBalancer::new(v.servers)))
+        .iter()
+        .map(|(k, v)| (k.to_owned(), RRLoadBalancer::new(v.servers.clone())))
         .collect();
 
     info!("{:?}", lb_map);
 
     let lb_map = Arc::new(lb_map);
 
+    let map: HashMap<String, Vec<SocketAddr>> = proxy
+        .locations
+        .into_iter()
+        .map(|(k, v)| (k, v.servers.iter().map(|tuple| tuple.0).collect()))
+        .collect();
+
     let pool = Arc::new(
-        ConnectionPool::new(
-            &[
-                "127.0.0.1:8090".parse().unwrap(),
-                "127.0.0.1:8091".parse().unwrap(),
-            ],
-            shutdown_handler.clone(),
-        )
-        .await
-        .map_err(|e| {
-            error!("{e}");
-            HyperPassError::ConnectionPoolCreationError
-        })?,
+        ConnectionPool::new(&map, shutdown_handler.clone())
+            .await
+            .map_err(|e| {
+                error!("{e}");
+                HyperPassError::ConnectionPoolCreationError
+            })?,
     );
 
     info!("http server listening on {} ...", proxy.port);

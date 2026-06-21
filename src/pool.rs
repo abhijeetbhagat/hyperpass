@@ -1,9 +1,10 @@
-use std::net::SocketAddr;
+use dashmap::DashMap;
+use std::{collections::HashMap, net::SocketAddr};
 
 use crate::{error::HyperPassError, shutdown::ShutdownHandler};
 use crossbeam::queue::ArrayQueue;
-use http_body_util::{BodyExt, combinators::BoxBody};
-use hyper::{Request, Response, body::Incoming, client::conn::http1::SendRequest};
+use http_body_util::{combinators::BoxBody, BodyExt};
+use hyper::{body::Incoming, client::conn::http1::SendRequest, Request, Response};
 use hyper_util::rt::TokioIo;
 use log::*;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ type ClientBuilder = hyper::client::conn::http1::Builder;
 pub struct InnerConnection(SendRequest<Incoming>);
 
 pub struct HyperPassConnection {
+    route: String,
     inner: Option<InnerConnection>,
     pool: Arc<InnerPool>,
 }
@@ -23,7 +25,7 @@ impl Drop for HyperPassConnection {
     fn drop(&mut self) {
         if let Some(inner) = self.inner.take() {
             debug!("adding conn back to pool");
-            let _ = self.pool.conns.push(inner);
+            let _ = self.pool.conns.get_mut(&self.route).unwrap().push(inner);
         }
     }
 }
@@ -34,56 +36,70 @@ pub struct ConnectionPool {
 }
 
 struct InnerPool {
-    conns: ArrayQueue<InnerConnection>,
+    conns: DashMap<String, ArrayQueue<InnerConnection>>,
 }
 
 impl ConnectionPool {
     pub async fn new(
-        addrs: &[SocketAddr],
+        addrs: &HashMap<String, Vec<SocketAddr>>,
         shutdown_handler: Arc<ShutdownHandler>,
     ) -> Result<Self, HyperPassError> {
-        let conns = ArrayQueue::new(2);
+        let conns = DashMap::new();
+
+        for (k, v) in addrs {
+            let queue = ArrayQueue::new(addrs.len());
+
+            for addr in v.iter() {
+                let out_sock = TcpStream::connect(addr).await.map_err(|e| {
+                    error!("failed to connect to {addr}: {e}");
+                    HyperPassError::UpstreamTCPConnFailed
+                })?;
+
+                let io = TokioIo::new(out_sock);
+
+                let (sender, conn) = ClientBuilder::new().handshake(io).await.map_err(|e| {
+                    error!("failed to handshake with {addr}: {e}");
+                    HyperPassError::UpstreamHandshakeFailed
+                })?;
+
+                shutdown_handler.spawn(async {
+                    if let Err(e) = conn.await {
+                        debug!("err: {}", e);
+                    }
+                });
+
+                let _ = queue.push(InnerConnection(sender));
+
+                // pool.add_conn(InnerConnection(sender));
+            }
+
+            conns.insert(k.to_owned(), queue);
+        }
+
         let inner = InnerPool { conns };
         let pool = Self {
             inner: Arc::new(inner),
         };
 
-        for addr in addrs {
-            let out_sock = TcpStream::connect(addr).await.map_err(|e| {
-                error!("{e}");
-                HyperPassError::UpstreamTCPConnFailed
-            })?;
-
-            let io = TokioIo::new(out_sock);
-
-            let (sender, conn) = ClientBuilder::new().handshake(io).await.map_err(|e| {
-                error!("{e}");
-                HyperPassError::UpstreamHandshakeFailed
-            })?;
-
-            shutdown_handler.spawn(async {
-                if let Err(e) = conn.await {
-                    debug!("err: {}", e);
-                }
-            });
-
-            pool.add_conn(InnerConnection(sender));
-        }
-
         Ok(pool)
     }
 
-    fn add_conn(&self, conn: InnerConnection) {
-        let _ = self.inner.conns.push(conn);
-    }
+    // fn add_conn(&self, conn: InnerConnection) {
+    //     let _ = self.inner.conns.push(conn);
+    // }
 
-    fn get_conn(&self) -> Option<HyperPassConnection> {
-        self.inner.conns.pop().map(|conn| {
-            Some(HyperPassConnection {
-                inner: Some(conn),
-                pool: self.inner.clone(),
-            })
-        })?
+    fn get_conn(&self, route: &str) -> Option<HyperPassConnection> {
+        if let Some(queue) = self.inner.conns.get_mut(route) {
+            queue.pop().map(|conn| {
+                Some(HyperPassConnection {
+                    route: route.to_owned(),
+                    inner: Some(conn),
+                    pool: self.inner.clone(),
+                })
+            })?
+        } else {
+            None
+        }
     }
 
     pub async fn send_request(
@@ -92,7 +108,7 @@ impl ConnectionPool {
     ) -> Result<Response<BoxBody<hyper::body::Bytes, hyper::Error>>, HyperPassError> {
         debug!("pool len: {}", self.inner.conns.len());
 
-        if let Some(mut conn) = self.get_conn() {
+        if let Some(mut conn) = self.get_conn(req.uri().path()) {
             let resp = conn
                 .inner
                 .as_mut()
