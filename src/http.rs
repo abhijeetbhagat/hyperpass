@@ -5,12 +5,12 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use crate::error::HyperPassError;
-use crate::http_util::{tls_config, HttpProxy};
+use crate::http_util::{HttpProxy, tls_config};
 use crate::loadbalance::RRLoadBalancer;
 use crate::pool::ConnectionPool;
 use crate::shutdown::ShutdownHandler;
 use futures::future::join_all;
-use http_body_util::{combinators::BoxBody, BodyExt};
+use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
