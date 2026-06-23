@@ -15,6 +15,7 @@ mod http_util;
 mod loadbalance;
 mod pool;
 mod proxy;
+mod rate_limiting;
 mod shutdown;
 mod tcp;
 mod upstream;
@@ -31,16 +32,16 @@ async fn main() -> io::Result<()> {
         "/".to_owned(),
         Upstream::new(vec![
             ("127.0.0.1:8090".parse().unwrap(), 2),
-            ("127.0.0.1:8091".parse().unwrap(), 3),
+            // ("127.0.0.1:8091".parse().unwrap(), 3),
         ]),
     );
-    locs_a.insert(
-        "/foo".to_owned(),
-        Upstream::new(vec![
-            ("127.0.0.1:8190".parse().unwrap(), 3),
-            ("127.0.0.1:8191".parse().unwrap(), 2),
-        ]),
-    );
+    // locs_a.insert(
+    //     "/foo".to_owned(),
+    //     Upstream::new(vec![
+    //         ("127.0.0.1:8190".parse().unwrap(), 3),
+    //         ("127.0.0.1:8191".parse().unwrap(), 2),
+    //     ]),
+    // );
 
     let mut locs_b = HashMap::new();
     locs_b.insert(
@@ -63,7 +64,7 @@ async fn main() -> io::Result<()> {
     let config = ConfigBuilder::new()
         .with_http_proxy_servers(vec![
             HttpProxy::new(9080, 5, locs_a, "certs/sample.pem", "certs/sample.rsa"),
-            HttpProxy::new(9081, 4, locs_b, "certs/sample.pem", "certs/sample.rsa"),
+            // HttpProxy::new(9081, 4, locs_b, "certs/sample.pem", "certs/sample.rsa"),
         ])
         .with_tcp_proxy_servers(vec![TcpProxy::new(9085, locs_c)])
         .build();

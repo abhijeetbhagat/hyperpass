@@ -1,4 +1,4 @@
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq)]
 pub enum HyperPassError {
     #[error("failed to connect to upstream server")]
     UpstreamConnectError,
@@ -28,4 +28,7 @@ pub enum HyperPassError {
     ConnectionPoolEmptyError,
     #[error("connection pool creation error")]
     ConnectionPoolCreationError,
+
+    #[error("too many requests")]
+    TooManyRequestsError,
 }

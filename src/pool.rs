@@ -1,10 +1,10 @@
 use dashmap::DashMap;
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
 
 use crate::{error::HyperPassError, shutdown::ShutdownHandler};
 use crossbeam::queue::ArrayQueue;
-use http_body_util::{BodyExt, combinators::BoxBody};
-use hyper::{Request, Response, body::Incoming, client::conn::http1::SendRequest};
+use http_body_util::{combinators::BoxBody, BodyExt};
+use hyper::{body::Incoming, client::conn::http1::SendRequest, Request, Response};
 use hyper_util::rt::TokioIo;
 use log::*;
 use std::sync::Arc;
@@ -65,7 +65,7 @@ impl ConnectionPool {
 
                 shutdown_handler.spawn(async {
                     if let Err(e) = conn.await {
-                        debug!("err: {}", e);
+                        debug!("conn awaiting over. err: {}", e);
                     }
                 });
 
