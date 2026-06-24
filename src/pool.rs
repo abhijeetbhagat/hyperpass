@@ -3,8 +3,8 @@ use std::net::SocketAddr;
 
 use crate::{error::HyperPassError, shutdown::ShutdownHandler};
 use crossbeam::queue::ArrayQueue;
-use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::{body::Incoming, client::conn::http1::SendRequest, Request, Response};
+use http_body_util::{BodyExt, combinators::BoxBody};
+use hyper::{Request, Response, body::Incoming, client::conn::http1::SendRequest};
 use hyper_util::rt::TokioIo;
 use log::*;
 use std::sync::Arc;
@@ -73,6 +73,8 @@ impl ConnectionPool {
 
                 // pool.add_conn(InnerConnection(sender));
             }
+
+            debug!("adding {} values", queue.len());
 
             conns.insert(addr.to_owned(), queue);
         }

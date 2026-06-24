@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use crate::error::HyperPassError;
-use crate::http_util::{tls_config, HttpProxy};
+use crate::http_util::{HttpProxy, tls_config};
 use crate::loadbalance::RRLoadBalancer;
 use crate::pool::ConnectionPool;
 use crate::rate_limiting::RateLimiter;
@@ -12,10 +12,10 @@ use crate::shutdown::ShutdownHandler;
 use dashmap::DashMap;
 use futures::future::join_all;
 use http_body_util::Full;
-use http_body_util::{combinators::BoxBody, BodyExt};
+use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::body::{Bytes, Incoming};
 use hyper::service::service_fn;
-use hyper::{Request, Response};
+use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use log::*;
 use std::sync::Arc;
@@ -90,8 +90,8 @@ async fn http_listener_loop(
             })?,
     );
 
-    let limiter_map = Arc::new(DashMap::new());
-    limiter_map.insert("127.0.0.1:8090", RateLimiter::new(5, 2));
+    let limiter = Arc::new(Mutex::new(RateLimiter::new(5, 2)));
+    // limiter_map.insert("127.0.0.1:8090", RateLimiter::new(5, 2));
     // limiter_map.insert("127.0.0.1:8091", RateLimiter::new(5, 2));
 
     info!("http server listening on {} ...", proxy.port);
@@ -103,14 +103,14 @@ async fn http_listener_loop(
                 match pair {
                     Ok((sock, addr)) => {
                         let lb_map = lb_map.clone();
-                        let limiter_map = limiter_map.clone();
+                        let limiter = limiter.clone();
                         let pool = pool.clone();
                         let tls_acceptor = tls_acceptor.clone();
 
                         shutdown_handler.spawn(async move {
                             match tls_acceptor.accept(sock).await {
                                 Ok(server_tls_stream) => {
-                                    if let Err(e) = handle_http_connection(lb_map, pool, server_tls_stream).await {
+                                    if let Err(e) = handle_http_connection(limiter, lb_map, pool, server_tls_stream).await {
                                         error!("Error handling connection from {}: {:?}", addr, e);
                                     }
                                 }
@@ -130,15 +130,12 @@ async fn http_listener_loop(
 }
 
 async fn handle_http_connection(
-    // limiter_map: Arc<DashMap<String, RateLimiter>>,
+    limiter: Arc<Mutex<RateLimiter>>,
     lb_map: Arc<HashMap<String, RRLoadBalancer>>,
     pool: Arc<ConnectionPool>,
     in_sock: tokio_rustls::server::TlsStream<TcpStream>,
 ) -> io::Result<()> {
     let io = TokioIo::new(in_sock);
-
-    // TODO abhi: mutex is going to hurt the performance
-    let limiter = Arc::new(Mutex::new(RateLimiter::new(5, 2)));
 
     let _result = ServerBuilder::new()
         .serve_connection(
@@ -148,17 +145,22 @@ async fn handle_http_connection(
 
                 // TODO abhi: locking is bad here
                 if limiter.lock().await.process(1).is_ok() {
+                    debug!("req allowed");
                     let lb = lb_map.get(&req.uri().to_string()).unwrap();
                     let addr = lb.next();
                     pool.send_request(&addr, req).await
                 } else {
                     debug!("too many requests");
-                    let body_data = "too many requests";
+                    let body_data = "too many requests. slow down.\n";
                     let full_body = Full::new(Bytes::from(body_data))
                         .map_err(|never| match never {})
                         .boxed();
                     let resp: Response<BoxBody<hyper::body::Bytes, hyper::Error>> =
-                        Response::new(full_body);
+                        // Response::new(full_body);
+                        Response::builder()
+                        .status(StatusCode::TOO_MANY_REQUESTS)
+                        .body(full_body)
+                        .unwrap();
 
                     Ok::<Response<BoxBody<hyper::body::Bytes, hyper::Error>>, HyperPassError>(
                         resp.map(|b| b.boxed()),

@@ -59,3 +59,25 @@ fn test_rate_limiting() {
     assert_eq!(limiter.process(0), Ok(()));
     assert_eq!(limiter.tokens_count as u32, 4);
 }
+
+#[test]
+fn test_rate_limiting_2() {
+    let mut limiter = RateLimiter::new(5, 2);
+    assert_eq!(limiter.process(1), Ok(()));
+    assert_eq!(limiter.process(1), Ok(()));
+    assert_eq!(limiter.process(1), Ok(()));
+    assert_eq!(limiter.process(1), Ok(()));
+    assert_eq!(limiter.process(1), Ok(()));
+    assert_eq!(
+        limiter.process(1),
+        Err(HyperPassError::TooManyRequestsError)
+    );
+    assert_eq!(
+        limiter.process(1),
+        Err(HyperPassError::TooManyRequestsError)
+    );
+    assert_eq!(
+        limiter.process(1),
+        Err(HyperPassError::TooManyRequestsError)
+    );
+}
