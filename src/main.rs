@@ -1,3 +1,5 @@
+#![feature(integer_atomics)]
+
 use std::{collections::HashMap, io};
 
 use crate::config::ConfigBuilder;

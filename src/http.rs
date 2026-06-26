@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use crate::error::HyperPassError;
-use crate::http_util::{HttpProxy, tls_config};
+use crate::http_util::{tls_config, HttpProxy};
 use crate::loadbalance::RRLoadBalancer;
 use crate::pool::ConnectionPool;
 use crate::rate_limiting::RateLimiter;
@@ -12,7 +12,7 @@ use crate::shutdown::ShutdownHandler;
 use dashmap::DashMap;
 use futures::future::join_all;
 use http_body_util::Full;
-use http_body_util::{BodyExt, combinators::BoxBody};
+use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::body::{Bytes, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
@@ -90,7 +90,7 @@ async fn http_listener_loop(
             })?,
     );
 
-    let limiter = Arc::new(Mutex::new(RateLimiter::new(5, 2)));
+    let limiter = Arc::new(RateLimiter::new(5, 2));
     // limiter_map.insert("127.0.0.1:8090", RateLimiter::new(5, 2));
     // limiter_map.insert("127.0.0.1:8091", RateLimiter::new(5, 2));
 
@@ -130,7 +130,7 @@ async fn http_listener_loop(
 }
 
 async fn handle_http_connection(
-    limiter: Arc<Mutex<RateLimiter>>,
+    limiter: Arc<RateLimiter>,
     lb_map: Arc<HashMap<String, RRLoadBalancer>>,
     pool: Arc<ConnectionPool>,
     in_sock: tokio_rustls::server::TlsStream<TcpStream>,
@@ -143,8 +143,7 @@ async fn handle_http_connection(
             service_fn(async |req: Request<Incoming>| {
                 info!("{:?}", req);
 
-                // TODO abhi: locking is bad here
-                if limiter.lock().await.process(1).is_ok() {
+                if limiter.process(1).is_ok() {
                     debug!("req allowed");
                     let lb = lb_map.get(&req.uri().to_string()).unwrap();
                     let addr = lb.next();
