@@ -1,9 +1,10 @@
 use crate::error::HyperPassError;
+use crate::rate_limiting::rate_limiter::{self, RateLimiter};
 use crate::upstream::Upstream;
 use log::*;
-use rustls::ServerConfig;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::ServerConfig;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -13,6 +14,7 @@ pub struct HttpProxy {
     pub locations: HashMap<String, Upstream>,
     pub ssl_server_cert_path: PathBuf,
     pub ssl_server_key_path: PathBuf,
+    pub rate_limiter: Box<dyn RateLimiter>,
 }
 
 impl HttpProxy {
@@ -22,6 +24,7 @@ impl HttpProxy {
         locations: HashMap<String, Upstream>,
         ssl_server_cert_path: impl AsRef<Path>,
         ssl_server_key_path: impl AsRef<Path>,
+        rate_limiter: Box<dyn RateLimiter>,
     ) -> Self {
         Self {
             port,
@@ -29,6 +32,7 @@ impl HttpProxy {
             locations,
             ssl_server_cert_path: ssl_server_cert_path.as_ref().to_owned(),
             ssl_server_key_path: ssl_server_key_path.as_ref().to_owned(),
+            rate_limiter,
         }
     }
 }

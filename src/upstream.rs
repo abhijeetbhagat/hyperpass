@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+/// A collection of upstream servers for load balancing
 pub struct Upstream {
     pub servers: Vec<(SocketAddr, u8)>,
 }

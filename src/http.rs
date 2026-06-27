@@ -7,7 +7,7 @@ use crate::error::HyperPassError;
 use crate::http_util::{tls_config, HttpProxy};
 use crate::loadbalance::RRLoadBalancer;
 use crate::pool::ConnectionPool;
-use crate::rate_limiting::RateLimiter;
+use crate::rate_limiting::rate_limiter::RateLimiter;
 use crate::shutdown::ShutdownHandler;
 use dashmap::DashMap;
 use futures::future::join_all;
@@ -20,7 +20,6 @@ use hyper_util::rt::TokioIo;
 use log::*;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
@@ -90,7 +89,7 @@ async fn http_listener_loop(
             })?,
     );
 
-    let limiter = Arc::new(RateLimiter::new(5, 2));
+    let limiter = Arc::new(proxy.rate_limiter);
     // limiter_map.insert("127.0.0.1:8090", RateLimiter::new(5, 2));
     // limiter_map.insert("127.0.0.1:8091", RateLimiter::new(5, 2));
 
@@ -130,7 +129,7 @@ async fn http_listener_loop(
 }
 
 async fn handle_http_connection(
-    limiter: Arc<RateLimiter>,
+    limiter: Arc<Box<dyn RateLimiter>>,
     lb_map: Arc<HashMap<String, RRLoadBalancer>>,
     pool: Arc<ConnectionPool>,
     in_sock: tokio_rustls::server::TlsStream<TcpStream>,

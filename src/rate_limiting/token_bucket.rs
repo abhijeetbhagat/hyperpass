@@ -1,17 +1,19 @@
 use crate::error::HyperPassError;
+use crate::rate_limiting::RateLimiter;
 use std::{
     sync::atomic::{AtomicU128, Ordering},
     time::Instant,
 };
 
-pub struct RateLimiter {
+/// A lock-free token bucket rate limiter
+pub struct TokenBucketRateLimiter {
     capacity: f64,
     leak_rate: f64,
     time_and_tokens: AtomicU128,
     rate_limiter_start_epoch: Instant,
 }
 
-impl RateLimiter {
+impl TokenBucketRateLimiter {
     pub fn new(capacity: u32, leak_rate: u32) -> Self {
         Self {
             capacity: capacity as f64,
@@ -20,8 +22,10 @@ impl RateLimiter {
             rate_limiter_start_epoch: Instant::now(),
         }
     }
+}
 
-    pub fn process(&self, req_count: u32) -> Result<(), HyperPassError> {
+impl RateLimiter for TokenBucketRateLimiter {
+    fn process(&self, req_count: u32) -> Result<(), HyperPassError> {
         let current_epoch = std::time::Instant::now();
         let time_diff = (current_epoch - self.rate_limiter_start_epoch).as_nanos() as u64;
 
@@ -80,7 +84,7 @@ fn unpack(time_and_count: u128) -> (u64, f64) {
 
 #[test]
 fn test_rate_limiting() {
-    let limiter = RateLimiter::new(10, 2);
+    let limiter = TokenBucketRateLimiter::new(10, 2);
     assert_eq!(limiter.process(1), Ok(()));
     assert_eq!(limiter.process(9), Ok(()));
     assert_eq!(
@@ -94,7 +98,7 @@ fn test_rate_limiting() {
 
 #[test]
 fn test_rate_limiting_2() {
-    let limiter = RateLimiter::new(5, 2);
+    let limiter = TokenBucketRateLimiter::new(5, 2);
     assert_eq!(limiter.process(1), Ok(()));
     assert_eq!(limiter.process(1), Ok(()));
     assert_eq!(limiter.process(1), Ok(()));

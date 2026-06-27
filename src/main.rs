@@ -4,6 +4,7 @@ use std::{collections::HashMap, io};
 
 use crate::config::ConfigBuilder;
 use crate::http_util::HttpProxy;
+use crate::rate_limiting::{LeakyBucketRateLimiter, TokenBucketRateLimiter};
 use crate::shutdown::ShutdownHandler;
 use crate::tcp::TcpProxy;
 use crate::upstream::Upstream;
@@ -65,7 +66,15 @@ async fn main() -> io::Result<()> {
 
     let config = ConfigBuilder::new()
         .with_http_proxy_servers(vec![
-            HttpProxy::new(9080, 20, locs_a, "certs/sample.pem", "certs/sample.rsa"),
+            HttpProxy::new(
+                9080,
+                20,
+                locs_a,
+                "certs/sample.pem",
+                "certs/sample.rsa",
+                // Box::new(TokenBucketRateLimiter::new(5, 2)),
+                Box::new(LeakyBucketRateLimiter::new(5, 2)),
+            ),
             // HttpProxy::new(9081, 4, locs_b, "certs/sample.pem", "certs/sample.rsa"),
         ])
         .with_tcp_proxy_servers(vec![TcpProxy::new(9085, locs_c)])
