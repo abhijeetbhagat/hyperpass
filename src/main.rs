@@ -77,7 +77,10 @@ async fn main() -> io::Result<()> {
             ),
             // HttpProxy::new(9081, 4, locs_b, "certs/sample.pem", "certs/sample.rsa"),
         ])
-        .with_tcp_proxy_servers(vec![TcpProxy::new(9085, locs_c)])
+        .with_tcp_proxy_servers(vec![
+            // TcpProxy::new(9085, locs_c, false),
+            TcpProxy::new(9086, locs_c, true),
+        ])
         .build();
 
     let shutdown_handler = Arc::new(ShutdownHandler::new());

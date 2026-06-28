@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use crate::error::HyperPassError;
-use crate::http_util::{tls_config, HttpProxy};
+use crate::http_util::{HttpProxy, tls_config};
 use crate::loadbalance::RRLoadBalancer;
 use crate::pool::ConnectionPool;
 use crate::rate_limiting::rate_limiter::RateLimiter;
@@ -12,7 +12,7 @@ use crate::shutdown::ShutdownHandler;
 use dashmap::DashMap;
 use futures::future::join_all;
 use http_body_util::Full;
-use http_body_util::{combinators::BoxBody, BodyExt};
+use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::body::{Bytes, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};

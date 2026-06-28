@@ -1,4 +1,4 @@
-A layer 4 (TCP) & layer 7 (HTTP) reverse proxy.
+A layer 4 (TCP) & layer 7 (HTTP 1.1) reverse proxy.
 
 Has the following features:
 
