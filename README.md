@@ -8,6 +8,7 @@ Has the following features:
 - connection pooling for HTTP connections
 - graceful shutdown for Ctrl + C signal using tokio's `TaskTracker` & `CancellationToken`
 - rate limiting with lock-free token bucket & leaky bucket impls 
+- http connect tunneling
 
 
 To debug tasks in tokio-console:
